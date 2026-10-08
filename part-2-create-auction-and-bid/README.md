@@ -9,5 +9,5 @@ npm start
 are ready, runs pending migrations, and starts both apps. Open <http://localhost:5102>
 (API <http://localhost:3102>).
 
-Use `npm run db:reset` to discard Part 2 data and restore the ten demo users and six seeded
-auctions. It does not affect the databases used by other parts.
+Use `npm run db:reset` to discard Part 2 data and restore the ten predefined users and six
+seeded auctions. It does not affect databases used by other parts.

@@ -15,22 +15,21 @@ CREATE TABLE auctions (
   starting_price_cents integer NOT NULL CHECK (starting_price_cents > 0),
   ends_at timestamptz NOT NULL,
   location text NOT NULL CHECK (length(trim(location)) BETWEEN 2 AND 100),
-  condition text NOT NULL CHECK (length(trim(condition)) BETWEEN 2 AND 100),
+  condition text NOT NULL CHECK (condition IN (
+    'Used · Fully tested',
+    'Open box · Bench tested',
+    'Used · Matched set',
+    'Used · Minor rack wear',
+    'Certified refurbished',
+    'New old stock'
+  )),
   description text NOT NULL CHECK (length(trim(description)) BETWEEN 10 AND 4000),
   specs jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(specs) = 'array'),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE bids (
-  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  auction_id bigint NOT NULL REFERENCES auctions(id) ON DELETE CASCADE,
-  bidder_user_id integer NOT NULL REFERENCES users(id),
-  amount_cents integer NOT NULL CHECK (amount_cents > 0),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX bids_auction_created_idx ON bids (auction_id, created_at DESC, id DESC);
 CREATE INDEX auctions_ends_at_idx ON auctions (ends_at);
+CREATE INDEX auctions_category_idx ON auctions (category);
 
 INSERT INTO users (display_name, handle) VALUES
   ('Avery Chen', 'avery'), ('Maya Thompson', 'maya'), ('Theo Brooks', 'theo'),

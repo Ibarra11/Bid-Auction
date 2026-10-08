@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --exclude '../node_modules/**' src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "migrate": "tsx src/migrate.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.69.0",
@@ -13,7 +14,7 @@
     "@opentelemetry/sdk-trace-base": "^2.2.0",
     "fastify": "^5.6.2",
     "pg": "^8.16.3",
-    "zod": "^4.1.12"
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import pg from 'pg';
 
-const connectionString = process.env.DATABASE_URL ?? 'postgres://auction:auction@localhost:55432/auction_part_2';
+const connectionString =
+  process.env.DATABASE_URL ?? 'postgres://auction:auction@localhost:55432/auction_part_2';
 const migrationsUrl = new URL('../migrations/', import.meta.url);
 const client = new pg.Client({ connectionString });
 
@@ -13,7 +14,9 @@ try {
   )`);
 
   const files = (await readdir(migrationsUrl)).filter((file) => file.endsWith('.sql')).sort();
-  const applied = await client.query<{ filename: string }>('SELECT filename FROM schema_migrations');
+  const applied = await client.query<{ filename: string }>(
+    'SELECT filename FROM schema_migrations',
+  );
   const appliedFiles = new Set(applied.rows.map((row) => row.filename));
   let count = 0;
 
