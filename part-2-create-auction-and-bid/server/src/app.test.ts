@@ -1,8 +1,10 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { buildApp } from './app.js';
+import type { AuctionChangedEvent } from './realtime.js';
 
-const app = buildApp();
+const auctionChanges: AuctionChangedEvent[] = [];
+const app = buildApp({ publishAuctionChanged: (event) => auctionChanges.push(event) });
 const cleanup = new pg.Pool({
   connectionString:
     process.env.DATABASE_URL ?? 'postgres://auction:auction@localhost:55432/auction_part_2',
@@ -205,6 +207,9 @@ describe('database-backed marketplace API', () => {
         amountCents: 50000,
         bidder: { id: 2, handle: 'maya' },
       });
+      expect(auctionChanges.filter((event) => event.slug === slug)).toEqual([
+        { slug, bidId: firstBid.json().id },
+      ]);
 
       const lowLaterBid = await app.inject({
         method: 'POST',
@@ -225,6 +230,10 @@ describe('database-backed marketplace API', () => {
         payload: { userId: 3, amountCents: 50100 },
       });
       expect(secondBid.statusCode).toBe(201);
+      expect(auctionChanges.filter((event) => event.slug === slug)).toEqual([
+        { slug, bidId: firstBid.json().id },
+        { slug, bidId: secondBid.json().id },
+      ]);
 
       const detail = await app.inject({ method: 'GET', url: `/api/auctions/${slug}` });
       expect(detail.json()).toMatchObject({
@@ -251,6 +260,7 @@ describe('database-backed marketplace API', () => {
         code: 'AUCTION_ENDED',
         error: 'This auction has ended',
       });
+      expect(auctionChanges.filter((event) => event.slug === slug)).toHaveLength(2);
     } finally {
       await cleanup.query('DELETE FROM auctions WHERE slug = $1', [slug]);
     }

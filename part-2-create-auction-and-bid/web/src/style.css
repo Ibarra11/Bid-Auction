@@ -109,6 +109,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .item-summary { padding-top: 4px; }
 .item-summary h1 { margin: 7px 0 5px; font-family: "Manrope", sans-serif; font-size: clamp(29px, 3.2vw, 43px); letter-spacing: -.05em; line-height: 1.07; }
 .item-kicker { margin: 0 0 24px; color: var(--muted); font-size: 15px; }
+.live-update-status { width: fit-content; margin: -13px 0 13px; padding: 5px 9px; border-radius: 99px; background: #fff4e5; color: #9a6700; font-size: 11px; font-weight: 700; }
 .auction-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; padding: 22px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-soft); }
 .current-price { grid-column: 1 / -1; padding-bottom: 17px; border-bottom: 1px solid var(--line); }
 .auction-panel span, .auction-panel small { display: block; color: var(--muted); font-size: 12px; }

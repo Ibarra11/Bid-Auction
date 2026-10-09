@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import pg from 'pg';
 import { z } from 'zod';
+import type { AuctionChangedEvent } from './realtime.js';
 
 const connectionString =
   process.env.DATABASE_URL ?? 'postgres://auction:auction@localhost:55432/auction_part_2';
@@ -149,9 +150,16 @@ function toAuction(row: AuctionRow) {
   };
 }
 
-export function buildApp() {
+export function buildApp(
+  options: { publishAuctionChanged?: (event: AuctionChangedEvent) => void } = {},
+) {
   const app = Fastify({ logger: true, requestIdHeader: 'x-request-id' });
   const pool = new pg.Pool({ connectionString, connectionTimeoutMillis: 1000 });
+
+  async function auctionExists(slug: string): Promise<boolean> {
+    const result = await pool.query('SELECT 1 FROM auctions WHERE slug = $1', [slug]);
+    return Boolean(result.rowCount);
+  }
 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('x-request-id', request.id);
@@ -349,14 +357,21 @@ export function buildApp() {
         [auction.id, bidder.id, body.data.amountCents],
       );
       await client.query('COMMIT');
-      return reply.code(201).send(
-        toBid({
-          ...inserted.rows[0],
-          bidder_id: bidder.id,
-          bidder_display_name: bidder.display_name,
-          bidder_handle: bidder.handle,
-        }),
-      );
+      const bid = toBid({
+        ...inserted.rows[0],
+        bidder_id: bidder.id,
+        bidder_display_name: bidder.display_name,
+        bidder_handle: bidder.handle,
+      });
+      try {
+        options.publishAuctionChanged?.({ slug: params.data.slug, bidId: bid.id });
+      } catch (error) {
+        request.log.error(
+          { err: error, slug: params.data.slug, bidId: bid.id },
+          'auction change publication failed',
+        );
+      }
+      return reply.code(201).send(bid);
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw error;
@@ -366,5 +381,5 @@ export function buildApp() {
   });
 
   app.addHook('onClose', async () => pool.end());
-  return app;
+  return Object.assign(app, { auctionExists });
 }

@@ -9,6 +9,9 @@ export default defineConfig({
   server: {
     port: webPort,
     strictPort: true,
-    proxy: { '/api': `http://localhost:${apiPort}` },
+    proxy: {
+      '/api': `http://localhost:${apiPort}`,
+      '/socket.io': { target: `http://localhost:${apiPort}`, ws: true },
+    },
   },
 });

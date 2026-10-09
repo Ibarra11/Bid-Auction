@@ -15,6 +15,7 @@ import { ProductCard } from './components/ProductCard';
 import { NewAuctionPage } from './components/NewAuctionPage';
 import { SiteHeader } from './components/SiteHeader';
 import { activeUserStorageKey, UserSwitcher } from './components/UserSwitcher';
+import { createRefreshCoalescer, type LiveAuctionStatus, watchAuctionChanges } from './liveAuction';
 
 function Status({ message, error = false }: { message: string; error?: boolean }) {
   return (
@@ -203,20 +204,52 @@ function BidHistory({ item }: { item: AuctionItem }) {
 function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | null }) {
   const [item, setItem] = useState<AuctionItem | null>(null);
   const [error, setError] = useState('');
+  const [liveStatus, setLiveStatus] = useState<LiveAuctionStatus>('connecting');
 
   async function loadAuction() {
     const auction = await fetchAuction(slug);
     setItem(auction);
+    setError('');
     document.title = `${auction.title} · Auction House`;
   }
 
   useEffect(() => {
+    let active = true;
     setError('');
-    void loadAuction().catch(() => setError('Auction not found or unavailable.'));
-    const refresh = window.setInterval(() => {
-      void loadAuction().catch(() => setError('Auction not found or unavailable.'));
-    }, 750);
-    return () => window.clearInterval(refresh);
+    setLiveStatus('connecting');
+    const refreshAuction = createRefreshCoalescer(async () => {
+      const auction = await fetchAuction(slug);
+      if (!active) return;
+      setItem(auction);
+      setError('');
+      document.title = `${auction.title} · Auction House`;
+    });
+    const refresh = () => {
+      void refreshAuction().catch(() => {
+        if (active) setError('Auction not found or unavailable.');
+      });
+    };
+
+    refresh();
+    const stopWatching = watchAuctionChanges(slug, {
+      onChanged: refresh,
+      onSubscribed: refresh,
+      onStatusChanged: (status) => {
+        if (active) setLiveStatus(status);
+      },
+    });
+    const safetyRefresh = window.setInterval(refresh, 30_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+
+    return () => {
+      active = false;
+      stopWatching();
+      window.clearInterval(safetyRefresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [slug]);
 
   if (error) return <Status message={error} error />;
@@ -251,6 +284,11 @@ function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | n
           </p>
           <h1>{item.title}</h1>
           <p className="item-kicker">{item.kicker}</p>
+          {liveStatus !== 'live' && (
+            <p className="live-update-status" role="status">
+              Live updates {liveStatus === 'connecting' ? 'connecting…' : 'reconnecting…'}
+            </p>
+          )}
           <div className="auction-panel">
             <div className="current-price">
               <span>{item.bidCount ? 'Current bid' : 'Starting price'}</span>
