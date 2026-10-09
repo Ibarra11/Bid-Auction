@@ -3,6 +3,7 @@ import { io as createClient, type Socket } from 'socket.io-client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAuctionRealtime, type AuctionChangedEvent } from './realtime.js';
 
+const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:56379';
 const sockets: Socket[] = [];
 const apps: ReturnType<typeof Fastify>[] = [];
 
@@ -37,6 +38,7 @@ describe('auction realtime rooms', () => {
       async (slug) => slug === 'nvidia-h100-sxm-80gb' || slug === 'amd-epyc-9654',
     );
     app.addHook('onClose', async () => realtime.close());
+    await realtime.connectRedis(redisUrl, `part-2-room-test-${Date.now()}`);
     const address = await app.listen({ host: '127.0.0.1', port: 0 });
     const matching = await connect(address);
     const other = await connect(address);
@@ -59,6 +61,7 @@ describe('auction realtime rooms', () => {
     apps.push(app);
     const realtime = createAuctionRealtime(app.server, app.log, async () => false);
     app.addHook('onClose', async () => realtime.close());
+    await realtime.connectRedis(redisUrl, `part-2-validation-test-${Date.now()}`);
     const address = await app.listen({ host: '127.0.0.1', port: 0 });
     const socket = await connect(address);
 

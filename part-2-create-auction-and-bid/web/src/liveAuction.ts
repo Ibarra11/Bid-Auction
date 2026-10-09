@@ -5,7 +5,8 @@ export type AuctionChangedEvent = {
   bidId: string;
 };
 
-export type LiveAuctionStatus = 'connecting' | 'live' | 'reconnecting';
+export type LiveAuctionStatus = 'connecting' | 'live' | 'polling';
+type RealtimeStatusEvent = { status: 'ok' | 'degraded' };
 
 type SubscriptionResult = { ok: true } | { ok: false; error: string };
 
@@ -40,6 +41,27 @@ export function createRefreshCoalescer(refresh: () => Promise<void>): () => Prom
   };
 }
 
+export function createFallbackRefreshController(refresh: () => void) {
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  return {
+    update(status: LiveAuctionStatus) {
+      if (status === 'polling' && timer === null) {
+        refresh();
+        timer = setInterval(refresh, 5_000);
+      }
+      if (status === 'live' && timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    },
+    stop() {
+      if (timer !== null) clearInterval(timer);
+      timer = null;
+    },
+  };
+}
+
 export function watchAuctionChanges(
   slug: string,
   handlers: {
@@ -49,23 +71,42 @@ export function watchAuctionChanges(
   },
 ): () => void {
   const socket = io({ autoConnect: false });
+  let subscribed = false;
 
-  socket.on('connect', () => {
-    handlers.onStatusChanged('connecting');
+  function subscribe() {
+    if (!socket.connected || subscribed) return;
     socket.emit('auction:watch', { slug }, (result: SubscriptionResult) => {
+      subscribed = result.ok;
       if (!result.ok) {
-        handlers.onStatusChanged('reconnecting');
+        handlers.onStatusChanged('polling');
         return;
       }
       handlers.onStatusChanged('live');
       handlers.onSubscribed();
     });
+  }
+
+  socket.on('connect', () => {
+    subscribed = false;
+    handlers.onStatusChanged('connecting');
+    subscribe();
   });
   socket.on('auction:changed', (event: AuctionChangedEvent) => {
     if (event.slug === slug) handlers.onChanged(event);
   });
-  socket.on('disconnect', () => handlers.onStatusChanged('reconnecting'));
-  socket.on('connect_error', () => handlers.onStatusChanged('reconnecting'));
+  socket.on('realtime:status', (event: RealtimeStatusEvent) => {
+    if (event.status === 'degraded') {
+      subscribed = false;
+      handlers.onStatusChanged('polling');
+      return;
+    }
+    subscribe();
+  });
+  socket.on('disconnect', () => {
+    subscribed = false;
+    handlers.onStatusChanged('polling');
+  });
+  socket.on('connect_error', () => handlers.onStatusChanged('polling'));
 
   const connectTimer = window.setTimeout(() => socket.connect(), 0);
   return () => {

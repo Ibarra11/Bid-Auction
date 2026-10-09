@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createRefreshCoalescer } from './liveAuction';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createFallbackRefreshController, createRefreshCoalescer } from './liveAuction';
+
+afterEach(() => vi.useRealTimers());
 
 describe('auction refresh coalescing', () => {
   it('runs at most one trailing refresh while a refresh is in flight', async () => {
@@ -33,5 +35,24 @@ describe('auction refresh coalescing', () => {
     await coalescedRefresh();
 
     expect(refresh).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('degraded realtime refresh', () => {
+  it('refreshes immediately and every five seconds until realtime recovers', () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn();
+    const fallback = createFallbackRefreshController(refresh);
+
+    fallback.update('polling');
+    fallback.update('polling');
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(10_000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+
+    fallback.update('live');
+    vi.advanceTimersByTime(10_000);
+    expect(refresh).toHaveBeenCalledTimes(3);
   });
 });

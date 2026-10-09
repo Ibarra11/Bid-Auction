@@ -15,7 +15,12 @@ import { ProductCard } from './components/ProductCard';
 import { NewAuctionPage } from './components/NewAuctionPage';
 import { SiteHeader } from './components/SiteHeader';
 import { activeUserStorageKey, UserSwitcher } from './components/UserSwitcher';
-import { createRefreshCoalescer, type LiveAuctionStatus, watchAuctionChanges } from './liveAuction';
+import {
+  createFallbackRefreshController,
+  createRefreshCoalescer,
+  type LiveAuctionStatus,
+  watchAuctionChanges,
+} from './liveAuction';
 
 function Status({ message, error = false }: { message: string; error?: boolean }) {
   return (
@@ -229,13 +234,16 @@ function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | n
         if (active) setError('Auction not found or unavailable.');
       });
     };
+    const fallbackRefresh = createFallbackRefreshController(refresh);
 
     refresh();
     const stopWatching = watchAuctionChanges(slug, {
       onChanged: refresh,
       onSubscribed: refresh,
       onStatusChanged: (status) => {
-        if (active) setLiveStatus(status);
+        if (!active) return;
+        setLiveStatus(status);
+        fallbackRefresh.update(status);
       },
     });
     const safetyRefresh = window.setInterval(refresh, 30_000);
@@ -247,6 +255,7 @@ function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | n
     return () => {
       active = false;
       stopWatching();
+      fallbackRefresh.stop();
       window.clearInterval(safetyRefresh);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
@@ -286,7 +295,9 @@ function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | n
           <p className="item-kicker">{item.kicker}</p>
           {liveStatus !== 'live' && (
             <p className="live-update-status" role="status">
-              Live updates {liveStatus === 'connecting' ? 'connecting…' : 'reconnecting…'}
+              {liveStatus === 'connecting'
+                ? 'Live updates connecting…'
+                : 'Live updates reconnecting · checking every 5 seconds'}
             </p>
           )}
           <div className="auction-panel">

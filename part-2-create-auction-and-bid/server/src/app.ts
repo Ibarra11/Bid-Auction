@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import pg from 'pg';
 import { z } from 'zod';
-import type { AuctionChangedEvent } from './realtime.js';
+import type { AuctionChangedEvent, RealtimeStatus } from './realtime.js';
 
 const connectionString =
   process.env.DATABASE_URL ?? 'postgres://auction:auction@localhost:55432/auction_part_2';
@@ -151,7 +151,10 @@ function toAuction(row: AuctionRow) {
 }
 
 export function buildApp(
-  options: { publishAuctionChanged?: (event: AuctionChangedEvent) => void } = {},
+  options: {
+    publishAuctionChanged?: (event: AuctionChangedEvent) => void;
+    getRealtimeStatus?: () => RealtimeStatus;
+  } = {},
 ) {
   const app = Fastify({ logger: true, requestIdHeader: 'x-request-id' });
   const pool = new pg.Pool({ connectionString, connectionTimeoutMillis: 1000 });
@@ -168,7 +171,8 @@ export function buildApp(
   app.get('/api/health', async (request, reply) => {
     try {
       await pool.query('SELECT 1');
-      return { ok: true, db: 'ok', requestId: request.id };
+      const realtime = options.getRealtimeStatus?.() ?? 'ok';
+      return { ok: true, db: 'ok', realtime, requestId: request.id };
     } catch (error) {
       request.log.error({ err: error }, 'database health check failed');
       return reply.code(503).send({ ok: false, db: 'down', requestId: request.id });
