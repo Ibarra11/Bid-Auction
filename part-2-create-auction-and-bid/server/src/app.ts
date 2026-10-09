@@ -268,64 +268,101 @@ export function buildApp() {
       return reply.code(400).send({ error: 'Invalid bid' });
     }
 
-    const auctionResult = await pool.query<{
-      id: string;
-      seller_user_id: number;
-      ends_at: Date;
-      current_price_cents: number;
-      bid_count: number;
-    }>(
-      `SELECT a.id::text, a.seller_user_id, a.ends_at,
-         COALESCE(max(b.amount_cents), a.starting_price_cents)::int AS current_price_cents,
-         count(b.id)::int AS bid_count
-       FROM auctions a
-       LEFT JOIN bids b ON b.auction_id = a.id
-       WHERE a.slug = $1
-       GROUP BY a.id`,
-      [params.data.slug],
-    );
-    const auction = auctionResult.rows[0];
-    if (!auction) return reply.code(404).send({ error: 'Auction not found' });
-
     const bidderResult = await pool.query<{ id: number; display_name: string; handle: string }>(
       'SELECT id, display_name, handle FROM users WHERE id = $1',
       [body.data.userId],
     );
     const bidder = bidderResult.rows[0];
     if (!bidder) return reply.code(400).send({ error: 'Unknown active user' });
-    if (auction.seller_user_id === bidder.id) {
-      return reply.code(409).send({ error: 'Sellers cannot bid on their own auctions' });
-    }
-    if (auction.ends_at.getTime() <= Date.now()) {
-      return reply.code(409).send({ error: 'This auction has ended' });
-    }
 
-    const minimumBidCents =
-      auction.bid_count === 0 ? auction.current_price_cents : auction.current_price_cents + 100;
-    if (body.data.amountCents < minimumBidCents) {
-      return reply.code(409).send({
-        error:
-          auction.bid_count === 0
-            ? 'First bid must meet the starting price'
-            : 'Bid must be at least $1 above the current amount',
-        minimumBidCents,
-      });
-    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const auctionResult = await client.query<{
+        id: string;
+        seller_user_id: number;
+        ends_at: Date;
+      }>(
+        `SELECT id::text, seller_user_id, ends_at
+         FROM auctions
+         WHERE slug = $1
+         FOR UPDATE`,
+        [params.data.slug],
+      );
+      const auction = auctionResult.rows[0];
+      if (!auction) {
+        await client.query('ROLLBACK');
+        return reply.code(404).send({ error: 'Auction not found' });
+      }
 
-    const inserted = await pool.query<{ id: string; amount_cents: number; created_at: Date }>(
-      `INSERT INTO bids (auction_id, bidder_user_id, amount_cents)
-       VALUES ($1, $2, $3)
-       RETURNING id::text, amount_cents, created_at`,
-      [auction.id, bidder.id, body.data.amountCents],
-    );
-    return reply.code(201).send(
-      toBid({
-        ...inserted.rows[0],
-        bidder_id: bidder.id,
-        bidder_display_name: bidder.display_name,
-        bidder_handle: bidder.handle,
-      }),
-    );
+      if (auction.seller_user_id === bidder.id) {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({
+          code: 'SELLER_CANNOT_BID',
+          error: 'Sellers cannot bid on their own auctions',
+        });
+      }
+      if (auction.ends_at.getTime() <= Date.now()) {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({
+          code: 'AUCTION_ENDED',
+          error: 'This auction has ended',
+        });
+      }
+
+      const bidStateResult = await client.query<{
+        current_price_cents: number;
+        bid_count: number;
+      }>(
+        `SELECT COALESCE(max(b.amount_cents), a.starting_price_cents)::int AS current_price_cents,
+           count(b.id)::int AS bid_count
+         FROM auctions a
+         LEFT JOIN bids b ON b.auction_id = a.id
+         WHERE a.id = $1
+         GROUP BY a.id`,
+        [auction.id],
+      );
+      const bidState = bidStateResult.rows[0];
+      const minimumBidCents =
+        bidState.bid_count === 0
+          ? bidState.current_price_cents
+          : bidState.current_price_cents + 100;
+      if (body.data.amountCents < minimumBidCents) {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({
+          code: 'BID_TOO_LOW',
+          error: 'Bid is below the current minimum',
+          minimumBidCents,
+          currentPriceCents: bidState.current_price_cents,
+          bidCount: bidState.bid_count,
+        });
+      }
+
+      const inserted = await client.query<{
+        id: string;
+        amount_cents: number;
+        created_at: Date;
+      }>(
+        `INSERT INTO bids (auction_id, bidder_user_id, amount_cents, created_at)
+         VALUES ($1, $2, $3, clock_timestamp())
+         RETURNING id::text, amount_cents, created_at`,
+        [auction.id, bidder.id, body.data.amountCents],
+      );
+      await client.query('COMMIT');
+      return reply.code(201).send(
+        toBid({
+          ...inserted.rows[0],
+          bidder_id: bidder.id,
+          bidder_display_name: bidder.display_name,
+          bidder_handle: bidder.handle,
+        }),
+      );
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   });
 
   app.addHook('onClose', async () => pool.end());

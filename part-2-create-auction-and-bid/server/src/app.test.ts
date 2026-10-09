@@ -177,7 +177,10 @@ describe('database-backed marketplace API', () => {
         payload: { userId: 1, amountCents: 50000 },
       });
       expect(sellerBid.statusCode).toBe(409);
-      expect(sellerBid.json()).toEqual({ error: 'Sellers cannot bid on their own auctions' });
+      expect(sellerBid.json()).toEqual({
+        code: 'SELLER_CANNOT_BID',
+        error: 'Sellers cannot bid on their own auctions',
+      });
 
       const lowFirstBid = await app.inject({
         method: 'POST',
@@ -185,7 +188,12 @@ describe('database-backed marketplace API', () => {
         payload: { userId: 2, amountCents: 49999 },
       });
       expect(lowFirstBid.statusCode).toBe(409);
-      expect(lowFirstBid.json()).toMatchObject({ minimumBidCents: 50000 });
+      expect(lowFirstBid.json()).toMatchObject({
+        code: 'BID_TOO_LOW',
+        minimumBidCents: 50000,
+        currentPriceCents: 50000,
+        bidCount: 0,
+      });
 
       const firstBid = await app.inject({
         method: 'POST',
@@ -204,7 +212,12 @@ describe('database-backed marketplace API', () => {
         payload: { userId: 3, amountCents: 50099 },
       });
       expect(lowLaterBid.statusCode).toBe(409);
-      expect(lowLaterBid.json()).toMatchObject({ minimumBidCents: 50100 });
+      expect(lowLaterBid.json()).toMatchObject({
+        code: 'BID_TOO_LOW',
+        minimumBidCents: 50100,
+        currentPriceCents: 50000,
+        bidCount: 1,
+      });
 
       const secondBid = await app.inject({
         method: 'POST',
@@ -234,8 +247,63 @@ describe('database-backed marketplace API', () => {
         payload: { userId: 4, amountCents: 50200 },
       });
       expect(endedBid.statusCode).toBe(409);
-      expect(endedBid.json()).toEqual({ error: 'This auction has ended' });
+      expect(endedBid.json()).toEqual({
+        code: 'AUCTION_ENDED',
+        error: 'This auction has ended',
+      });
     } finally {
+      await cleanup.query('DELETE FROM auctions WHERE slug = $1', [slug]);
+    }
+  });
+
+  it('serializes simultaneous identical bids so only one is accepted', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/auctions',
+      payload: {
+        userId: 1,
+        title: `Concurrent Bid Test ${Date.now()}`,
+        category: 'GPUs',
+        description: 'A temporary listing used to prove atomic concurrent bid acceptance.',
+        condition: 'Used · Fully tested',
+        location: 'San Jose, CA',
+        startingPriceCents: 70000,
+        endsAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+    const { slug } = created.json() as { slug: string };
+    const blocker = await cleanup.connect();
+
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('LOCK TABLE bids IN SHARE MODE');
+
+      const pending = [2, 3, 4].map((userId) =>
+        app.inject({
+          method: 'POST',
+          url: `/api/auctions/${slug}/bids`,
+          payload: { userId, amountCents: 70000 },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await blocker.query('COMMIT');
+
+      const responses = await Promise.all(pending);
+      expect(responses.map((response) => response.statusCode).sort()).toEqual([201, 409, 409]);
+      for (const conflict of responses.filter((response) => response.statusCode === 409)) {
+        expect(conflict.json()).toMatchObject({
+          code: 'BID_TOO_LOW',
+          currentPriceCents: 70000,
+          minimumBidCents: 70100,
+          bidCount: 1,
+        });
+      }
+
+      const detail = await app.inject({ method: 'GET', url: `/api/auctions/${slug}` });
+      expect(detail.json().bidHistory).toHaveLength(1);
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => undefined);
+      blocker.release();
       await cleanup.query('DELETE FROM auctions WHERE slug = $1', [slug]);
     }
   });

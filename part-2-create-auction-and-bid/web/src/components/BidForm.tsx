@@ -1,12 +1,21 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   type AuctionItem,
+  BidRequestError,
   createBid,
   type DemoUser,
   formatCurrency,
   formatTimeLeft,
   parseDollarsToCents,
 } from '../catalog';
+
+export function staleBidMessage(error: BidRequestError): string | null {
+  if (error.details.code !== 'BID_TOO_LOW') return null;
+  const minimum = error.details.minimumBidCents;
+  return minimum === undefined
+    ? 'Another bid arrived first. Check the new minimum and try again.'
+    : `Another bid arrived first. The new minimum is ${formatCurrency(minimum)}.`;
+}
 
 export function BidForm({
   item,
@@ -47,11 +56,17 @@ export function BidForm({
     setSubmitting(true);
     try {
       await createBid(item.slug, { userId: activeUser.id, amountCents });
-      await onAccepted();
       setAmount('');
-      setSuccess('Bid accepted — you are the highest bidder.');
+      setSuccess('Bid accepted.');
+      await onAccepted().catch(() => undefined);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not place this bid.');
+      const staleMessage = caught instanceof BidRequestError ? staleBidMessage(caught) : null;
+      if (staleMessage) {
+        await onAccepted().catch(() => undefined);
+        setError(staleMessage);
+      } else {
+        setError(caught instanceof Error ? caught.message : 'Could not place this bid.');
+      }
     } finally {
       setSubmitting(false);
     }

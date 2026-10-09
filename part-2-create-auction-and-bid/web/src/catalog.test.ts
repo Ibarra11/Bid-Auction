@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchAuctions, formatCurrency, formatTimeLeft, parseDollarsToCents } from './catalog';
+import {
+  createBid,
+  fetchAuctions,
+  formatCurrency,
+  formatTimeLeft,
+  parseDollarsToCents,
+} from './catalog';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -34,5 +40,33 @@ describe('catalog helpers', () => {
     await fetchAuctions('  server rack  ', 'Chassis');
 
     expect(fetchMock).toHaveBeenCalledWith('/api/auctions?q=server+rack&category=Chassis');
+  });
+
+  it('preserves structured stale-bid details from the API', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 'BID_TOO_LOW',
+          error: 'Bid is below the current minimum',
+          minimumBidCents: 10200,
+          currentPriceCents: 10100,
+          bidCount: 4,
+        }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const result = createBid('test-auction', { userId: 2, amountCents: 10100 });
+
+    await expect(result).rejects.toMatchObject({
+      name: 'BidRequestError',
+      status: 409,
+      details: {
+        code: 'BID_TOO_LOW',
+        minimumBidCents: 10200,
+        currentPriceCents: 10100,
+        bidCount: 4,
+      },
+    });
   });
 });

@@ -42,6 +42,27 @@ export type Bid = {
   bidder: DemoUser;
 };
 
+export type BidConflictCode = 'BID_TOO_LOW' | 'AUCTION_ENDED' | 'SELLER_CANNOT_BID';
+
+type BidErrorBody = {
+  code?: BidConflictCode;
+  error?: string;
+  minimumBidCents?: number;
+  currentPriceCents?: number;
+  bidCount?: number;
+};
+
+export class BidRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly details: BidErrorBody,
+  ) {
+    super(message);
+    this.name = 'BidRequestError';
+  }
+}
+
 export type CreateAuctionInput = {
   userId: number;
   title: string;
@@ -96,8 +117,14 @@ export async function createBid(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
-  const body = (await response.json()) as Bid & { error?: string };
-  if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+  const body = (await response.json()) as Bid & BidErrorBody;
+  if (!response.ok) {
+    throw new BidRequestError(
+      body.error ?? `Request failed (${response.status})`,
+      response.status,
+      body,
+    );
+  }
   return body;
 }
 
