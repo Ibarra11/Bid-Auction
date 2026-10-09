@@ -1,4 +1,12 @@
 export const categories = ['GPUs', 'CPUs', 'Memory', 'Chassis', 'Networking', 'Cooling'] as const;
+export const conditions = [
+  'Used · Fully tested',
+  'Open box · Bench tested',
+  'Used · Matched set',
+  'Used · Minor rack wear',
+  'Certified refurbished',
+  'New old stock',
+] as const;
 
 export type Category = (typeof categories)[number];
 export type ProductArtKind = 'gpu' | 'cpu' | 'memory' | 'chassis' | 'switch' | 'cooling';
@@ -26,6 +34,17 @@ export type AuctionItem = {
   specs: Array<[string, string]>;
 };
 
+export type CreateAuctionInput = {
+  userId: number;
+  title: string;
+  category: string;
+  description: string;
+  condition: string;
+  location: string;
+  startingPriceCents: number;
+  endsAt: string;
+};
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Request failed (${response.status})`);
@@ -45,6 +64,27 @@ export function fetchAuction(slug: string): Promise<AuctionItem> {
 
 export function fetchUsers(): Promise<DemoUser[]> {
   return getJson('/api/users');
+}
+
+export async function createAuction(input: CreateAuctionInput): Promise<{ slug: string }> {
+  const response = await fetch('/api/auctions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json()) as { slug?: string; error?: string };
+  if (!response.ok || !body.slug) {
+    throw new Error(body.error ?? `Request failed (${response.status})`);
+  }
+  return { slug: body.slug };
+}
+
+export function parseDollarsToCents(value: string): number | null {
+  const normalized = value.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const [dollars, fraction = ''] = normalized.split('.');
+  const cents = Number(dollars) * 100 + Number(fraction.padEnd(2, '0'));
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : null;
 }
 
 export function formatCurrency(cents: number): string {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import pg from 'pg';
 import { z } from 'zod';
@@ -13,6 +14,50 @@ const listQuerySchema = z.object({
 const slugParamsSchema = z.object({
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
 });
+const conditionSchema = z.enum([
+  'Used · Fully tested',
+  'Open box · Bench tested',
+  'Used · Matched set',
+  'Used · Minor rack wear',
+  'Certified refurbished',
+  'New old stock',
+]);
+const createAuctionSchema = z
+  .object({
+    userId: z.number().int().positive(),
+    title: z.string().trim().min(3).max(120),
+    category: categorySchema,
+    description: z.string().trim().min(10).max(4000),
+    condition: conditionSchema,
+    location: z.string().trim().min(2).max(100),
+    startingPriceCents: z.number().int().positive().max(1_000_000_000),
+    endsAt: z.string().datetime({ offset: true }),
+  })
+  .refine((auction) => Date.parse(auction.endsAt) > Date.now() + 60_000, {
+    message: 'Closing time must be at least one minute in the future',
+    path: ['endsAt'],
+  });
+
+const artByCategory = {
+  GPUs: 'gpu',
+  CPUs: 'cpu',
+  Memory: 'memory',
+  Chassis: 'chassis',
+  Networking: 'switch',
+  Cooling: 'cooling',
+} as const;
+
+function slugify(title: string): string {
+  return (
+    title
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 80) || 'auction'
+  );
+}
 
 type AuctionRow = {
   slug: string;
@@ -120,6 +165,47 @@ export function buildApp() {
       return reply.code(404).send({ error: 'Auction not found' });
     }
     return toAuction(result.rows[0]);
+  });
+
+  app.post('/api/auctions', async (request, reply) => {
+    const parsed = createAuctionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'Invalid auction',
+        fields: z.flattenError(parsed.error).fieldErrors,
+      });
+    }
+
+    const auction = parsed.data;
+    const baseSlug = slugify(auction.title);
+    const existing = await pool.query('SELECT 1 FROM auctions WHERE slug = $1', [baseSlug]);
+    const slug = existing.rowCount ? `${baseSlug}-${randomUUID().slice(0, 8)}` : baseSlug;
+    const result = await pool.query<{ slug: string }>(
+      `INSERT INTO auctions (
+         slug, seller_user_id, title, kicker, category, art, starting_price_cents,
+         ends_at, location, condition, description, specs
+       )
+       SELECT $1, u.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, '[]'::jsonb
+       FROM users u WHERE u.id = $11
+       RETURNING slug`,
+      [
+        slug,
+        auction.title,
+        `Fresh listing from ${auction.location}`,
+        auction.category,
+        artByCategory[auction.category],
+        auction.startingPriceCents,
+        auction.endsAt,
+        auction.location,
+        auction.condition,
+        auction.description,
+        auction.userId,
+      ],
+    );
+    if (!result.rows[0]) {
+      return reply.code(400).send({ error: 'Unknown active user' });
+    }
+    return reply.code(201).send({ slug: result.rows[0].slug });
   });
 
   app.addHook('onClose', async () => pool.end());

@@ -57,16 +57,21 @@ export function SiteHeader({
           </select>
           <button type="submit">Search</button>
         </form>
-        <a
-          className="sign-in"
-          href="#demo-user"
-          aria-label={
-            activeUser ? `Active user: ${activeUser.displayName}` : 'Choosing active user'
-          }
-        >
-          <span className="avatar">{initial}</span>
-          <span>{activeUser?.displayName ?? 'Choosing user…'}</span>
-        </a>
+        <div className="header-actions">
+          <a className="sell-link" href="/auctions/new">
+            Sell
+          </a>
+          <a
+            className="sign-in"
+            href="#demo-user"
+            aria-label={
+              activeUser ? `Active user: ${activeUser.displayName}` : 'Choosing active user'
+            }
+          >
+            <span className="avatar">{initial}</span>
+            <span>{activeUser?.displayName ?? 'Choosing user…'}</span>
+          </a>
+        </div>
       </div>
       <nav className="container category-nav" aria-label="Equipment categories">
         <a href="/search">Featured</a>

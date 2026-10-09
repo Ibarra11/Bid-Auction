@@ -11,6 +11,7 @@ import {
 } from './catalog';
 import { ProductArt } from './components/ProductArt';
 import { ProductCard } from './components/ProductCard';
+import { NewAuctionPage } from './components/NewAuctionPage';
 import { SiteHeader } from './components/SiteHeader';
 import { activeUserStorageKey, UserSwitcher } from './components/UserSwitcher';
 
@@ -227,21 +228,23 @@ function ItemPage({ slug }: { slug: string }) {
           </div>
         </section>
       </div>
-      <div className="item-details-grid">
+      <div className={`item-details-grid${item.specs.length ? '' : ' details-only'}`}>
         <section>
           <p className="eyebrow">About this item</p>
           <h2>The details</h2>
           <p>{item.description}</p>
         </section>
-        <section className="spec-list">
-          <p className="eyebrow">Specifications</p>
-          {item.specs.map(([label, value]) => (
-            <div key={label}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </section>
+        {item.specs.length > 0 && (
+          <section className="spec-list">
+            <p className="eyebrow">Specifications</p>
+            {item.specs.map(([label, value]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </section>
+        )}
       </div>
     </main>
   );
@@ -282,6 +285,7 @@ export function App() {
   }, [path]);
   let page = <HomePage />;
   if (path === '/search') page = <SearchPage query={query} category={category} />;
+  if (path === '/auctions/new') page = <NewAuctionPage activeUser={activeUser} />;
   if (path.startsWith('/items/'))
     page = <ItemPage slug={decodeURIComponent(path.slice('/items/'.length))} />;
 
