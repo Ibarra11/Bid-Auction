@@ -32,6 +32,14 @@ export type AuctionItem = {
   condition: string;
   description: string;
   specs: Array<[string, string]>;
+  bidHistory?: Bid[];
+};
+
+export type Bid = {
+  id: string;
+  amountCents: number;
+  createdAt: string;
+  bidder: DemoUser;
 };
 
 export type CreateAuctionInput = {
@@ -77,6 +85,20 @@ export async function createAuction(input: CreateAuctionInput): Promise<{ slug: 
     throw new Error(body.error ?? `Request failed (${response.status})`);
   }
   return { slug: body.slug };
+}
+
+export async function createBid(
+  slug: string,
+  input: { userId: number; amountCents: number },
+): Promise<Bid> {
+  const response = await fetch(`/api/auctions/${encodeURIComponent(slug)}/bids`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json()) as Bid & { error?: string };
+  if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+  return body;
 }
 
 export function parseDollarsToCents(value: string): number | null {

@@ -9,6 +9,7 @@ import {
   formatCurrency,
   formatTimeLeft,
 } from './catalog';
+import { BidForm } from './components/BidForm';
 import { ProductArt } from './components/ProductArt';
 import { ProductCard } from './components/ProductCard';
 import { NewAuctionPage } from './components/NewAuctionPage';
@@ -155,18 +156,63 @@ function SearchPage({ query, category }: { query: string; category: string }) {
   );
 }
 
-function ItemPage({ slug }: { slug: string }) {
+function BidHistory({ item }: { item: AuctionItem }) {
+  const bids = item.bidHistory ?? [];
+  return (
+    <section className="bid-history-section">
+      <div className="bid-history-heading">
+        <div>
+          <p className="eyebrow">Activity</p>
+          <h2>Bid history</h2>
+        </div>
+        <span>
+          {bids.length} accepted {bids.length === 1 ? 'bid' : 'bids'}
+        </span>
+      </div>
+      {bids.length ? (
+        <div className="bid-history-list">
+          {bids.map((bid) => (
+            <article key={bid.id}>
+              <span className="bid-history-avatar">{bid.bidder.displayName.charAt(0)}</span>
+              <div>
+                <strong>{bid.bidder.displayName}</strong>
+                <span>@{bid.bidder.handle}</span>
+              </div>
+              <div>
+                <strong>{formatCurrency(bid.amountCents)}</strong>
+                <time dateTime={bid.createdAt}>
+                  {new Date(bid.createdAt).toLocaleString([], {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </time>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="bid-history-empty">
+          <strong>No bids yet</strong>
+          <span>Be the first bidder on this equipment.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | null }) {
   const [item, setItem] = useState<AuctionItem | null>(null);
   const [error, setError] = useState('');
 
+  async function loadAuction() {
+    const auction = await fetchAuction(slug);
+    setItem(auction);
+    document.title = `${auction.title} · Auction House`;
+  }
+
   useEffect(() => {
     setError('');
-    void fetchAuction(slug)
-      .then((auction) => {
-        setItem(auction);
-        document.title = `${auction.title} · Auction House`;
-      })
-      .catch(() => setError('Auction not found or unavailable.'));
+    void loadAuction().catch(() => setError('Auction not found or unavailable.'));
   }, [slug]);
 
   if (error) return <Status message={error} error />;
@@ -203,18 +249,21 @@ function ItemPage({ slug }: { slug: string }) {
           <p className="item-kicker">{item.kicker}</p>
           <div className="auction-panel">
             <div className="current-price">
-              <span>Starting price</span>
+              <span>{item.bidCount ? 'Current bid' : 'Starting price'}</span>
               <strong>{formatCurrency(item.currentPriceCents)}</strong>
-              <small>{item.bidCount} bids</small>
+              <small>
+                {item.bidCount} {item.bidCount === 1 ? 'bid' : 'bids'}
+              </small>
             </div>
             <div className="bidder">
               <span>Current bidder</span>
-              <strong>No bids yet</strong>
+              <strong>{item.currentBidder ? `@${item.currentBidder}` : 'No bids yet'}</strong>
             </div>
             <div className="ending">
               <span>Time left</span>
               <strong>{timeLeft}</strong>
             </div>
+            <BidForm item={item} activeUser={activeUser} onAccepted={loadAuction} />
           </div>
           <div className="seller-card">
             <span className="seller-avatar">{item.seller.displayName.charAt(0)}</span>
@@ -228,6 +277,7 @@ function ItemPage({ slug }: { slug: string }) {
           </div>
         </section>
       </div>
+      <BidHistory item={item} />
       <div className={`item-details-grid${item.specs.length ? '' : ' details-only'}`}>
         <section>
           <p className="eyebrow">About this item</p>
@@ -287,7 +337,9 @@ export function App() {
   if (path === '/search') page = <SearchPage query={query} category={category} />;
   if (path === '/auctions/new') page = <NewAuctionPage activeUser={activeUser} />;
   if (path.startsWith('/items/'))
-    page = <ItemPage slug={decodeURIComponent(path.slice('/items/'.length))} />;
+    page = (
+      <ItemPage slug={decodeURIComponent(path.slice('/items/'.length))} activeUser={activeUser} />
+    );
 
   return (
     <div className="app-shell">

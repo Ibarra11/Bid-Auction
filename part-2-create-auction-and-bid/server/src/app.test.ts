@@ -151,4 +151,92 @@ describe('database-backed marketplace API', () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'Unknown active user' });
   });
+
+  it('validates, persists, and returns sequential bid history', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/auctions',
+      payload: {
+        userId: 1,
+        title: `Bid Test ${Date.now()}`,
+        category: 'Networking',
+        description: 'A temporary listing used to verify every sequential bidding rule.',
+        condition: 'Certified refurbished',
+        location: 'Portland, OR',
+        startingPriceCents: 50000,
+        endsAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const { slug } = created.json() as { slug: string };
+
+    try {
+      const sellerBid = await app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 1, amountCents: 50000 },
+      });
+      expect(sellerBid.statusCode).toBe(409);
+      expect(sellerBid.json()).toEqual({ error: 'Sellers cannot bid on their own auctions' });
+
+      const lowFirstBid = await app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 2, amountCents: 49999 },
+      });
+      expect(lowFirstBid.statusCode).toBe(409);
+      expect(lowFirstBid.json()).toMatchObject({ minimumBidCents: 50000 });
+
+      const firstBid = await app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 2, amountCents: 50000 },
+      });
+      expect(firstBid.statusCode).toBe(201);
+      expect(firstBid.json()).toMatchObject({
+        amountCents: 50000,
+        bidder: { id: 2, handle: 'maya' },
+      });
+
+      const lowLaterBid = await app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 3, amountCents: 50099 },
+      });
+      expect(lowLaterBid.statusCode).toBe(409);
+      expect(lowLaterBid.json()).toMatchObject({ minimumBidCents: 50100 });
+
+      const secondBid = await app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 3, amountCents: 50100 },
+      });
+      expect(secondBid.statusCode).toBe(201);
+
+      const detail = await app.inject({ method: 'GET', url: `/api/auctions/${slug}` });
+      expect(detail.json()).toMatchObject({
+        currentPriceCents: 50100,
+        bidCount: 2,
+        currentBidder: 'theo',
+      });
+      expect(detail.json().bidHistory).toHaveLength(2);
+      expect(
+        detail.json().bidHistory.map((bid: { amountCents: number }) => bid.amountCents),
+      ).toEqual([50100, 50000]);
+
+      await cleanup.query(
+        `UPDATE auctions SET ends_at = now() - interval '1 minute' WHERE slug = $1`,
+        [slug],
+      );
+      const endedBid = await app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 4, amountCents: 50200 },
+      });
+      expect(endedBid.statusCode).toBe(409);
+      expect(endedBid.json()).toEqual({ error: 'This auction has ended' });
+    } finally {
+      await cleanup.query('DELETE FROM auctions WHERE slug = $1', [slug]);
+    }
+  });
 });
