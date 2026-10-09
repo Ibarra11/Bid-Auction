@@ -40,8 +40,14 @@ These product and domain decisions were agreed before implementation.
   be at least $1 above the highest accepted bid.
 - Every accepted bid is stored and shown with bidder, amount, and timestamp.
 - Bids cannot be edited or withdrawn.
-- Part 2 guarantees ordinary sequential behavior. Simultaneous bids can both validate
-  against the same previous amount; transaction locking is deliberately deferred to Part 3.
+- Bids are serialized per auction with a PostgreSQL transaction and auction-row lock. Each
+  bid validates against the latest committed amount after acquiring the lock, so identical
+  simultaneous bids produce one acceptance and stale-bid conflicts for the others.
+- The deadline is checked with PostgreSQL time after acquiring the auction lock. A request
+  queued before the closing time is rejected if its turn arrives after the auction ends.
+- Bid conflicts return stable machine-readable codes. The browser preserves a rejected
+  amount, refreshes authoritative auction state immediately, and never raises or resubmits
+  a bid automatically.
 - Checkout and payment after an auction closes are outside this capability.
 
 ## Reset behavior

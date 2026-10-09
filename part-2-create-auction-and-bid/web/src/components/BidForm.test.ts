@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BidRequestError } from '../catalog';
-import { staleBidMessage } from './BidForm';
+import { bidConflictMessage } from './BidForm';
 
 describe('stale bid feedback', () => {
   it('turns an authoritative minimum into actionable copy', () => {
@@ -11,14 +11,14 @@ describe('stale bid feedback', () => {
       bidCount: 4,
     });
 
-    expect(staleBidMessage(error)).toBe('Another bid arrived first. The new minimum is $102.');
+    expect(bidConflictMessage(error)).toBe('Another bid arrived first. The new minimum is $102.');
   });
 
-  it('does not treat other conflicts as stale bids', () => {
+  it('explains when an auction ended before the bid was accepted', () => {
     const error = new BidRequestError('This auction has ended', 409, {
       code: 'AUCTION_ENDED',
     });
 
-    expect(staleBidMessage(error)).toBeNull();
+    expect(bidConflictMessage(error)).toBe('This auction ended before your bid could be accepted.');
   });
 });

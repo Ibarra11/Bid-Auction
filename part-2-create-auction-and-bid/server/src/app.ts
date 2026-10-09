@@ -281,9 +281,9 @@ export function buildApp() {
       const auctionResult = await client.query<{
         id: string;
         seller_user_id: number;
-        ends_at: Date;
+        has_ended: boolean;
       }>(
-        `SELECT id::text, seller_user_id, ends_at
+        `SELECT id::text, seller_user_id, ends_at <= clock_timestamp() AS has_ended
          FROM auctions
          WHERE slug = $1
          FOR UPDATE`,
@@ -302,7 +302,7 @@ export function buildApp() {
           error: 'Sellers cannot bid on their own auctions',
         });
       }
-      if (auction.ends_at.getTime() <= Date.now()) {
+      if (auction.has_ended) {
         await client.query('ROLLBACK');
         return reply.code(409).send({
           code: 'AUCTION_ENDED',

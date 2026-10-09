@@ -307,4 +307,56 @@ describe('database-backed marketplace API', () => {
       await cleanup.query('DELETE FROM auctions WHERE slug = $1', [slug]);
     }
   });
+
+  it('rejects a bid that arrived before close but acquired the auction lock afterward', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/auctions',
+      payload: {
+        userId: 1,
+        title: `Deadline Lock Test ${Date.now()}`,
+        category: 'Networking',
+        description:
+          'A temporary listing used to prove deadline checks occur after lock acquisition.',
+        condition: 'Certified refurbished',
+        location: 'Portland, OR',
+        startingPriceCents: 90000,
+        endsAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+    const { slug } = created.json() as { slug: string };
+    const blocker = await cleanup.connect();
+
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query(
+        `UPDATE auctions
+         SET ends_at = clock_timestamp() + interval '500 milliseconds'
+         WHERE slug = $1`,
+        [slug],
+      );
+
+      const pendingBid = app.inject({
+        method: 'POST',
+        url: `/api/auctions/${slug}/bids`,
+        payload: { userId: 2, amountCents: 90000 },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await blocker.query('COMMIT');
+
+      const response = await pendingBid;
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        code: 'AUCTION_ENDED',
+        error: 'This auction has ended',
+      });
+
+      const detail = await app.inject({ method: 'GET', url: `/api/auctions/${slug}` });
+      expect(detail.json().bidHistory).toHaveLength(0);
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => undefined);
+      blocker.release();
+      await cleanup.query('DELETE FROM auctions WHERE slug = $1', [slug]);
+    }
+  });
 });

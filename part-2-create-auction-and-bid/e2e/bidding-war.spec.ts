@@ -20,7 +20,7 @@ async function launchWindow(player: (typeof players)[number], profileRoot: strin
   const context = await chromium.launchPersistentContext(
     path.join(profileRoot, String(player.userId)),
     {
-      channel: 'msedge',
+      channel: 'chrome',
       headless: false,
       viewport: null,
       args: [
@@ -144,7 +144,10 @@ test('Bidding War: simultaneous and deadline-crossing bids stay visible in four 
       { page: theo, dollars: '100.00' },
       { page: priya, dollars: '100.00' },
     ]);
-    expect(openingResults.every((result) => result.includes('accepted'))).toBe(true);
+    expect(openingResults.filter((result) => result.includes('Bid accepted.'))).toHaveLength(1);
+    expect(openingResults.filter((result) => result.includes('new minimum is $101'))).toHaveLength(
+      2,
+    );
 
     await seller.waitForTimeout(2_500);
     await announce(pages, 'ROUND 2 · $101 / $101 / $105 COLLISION');
@@ -162,8 +165,27 @@ test('Bidding War: simultaneous and deadline-crossing bids stay visible in four 
       { page: priya, dollars: '108.00' },
     ]);
 
-    await expect(seller.locator('.ending strong')).toHaveText('Ended', { timeout: 20_000 });
-    await announce(pages, 'TIME! ALL THREE TRY ONE LAST $200 BID…');
+    await announce(pages, 'DEADLINE RACE · MAYA QUEUES A $200 BID');
+    await database.query('BEGIN');
+    await database.query(
+      `UPDATE auctions
+       SET ends_at = clock_timestamp() + interval '1 second'
+       WHERE slug = $1`,
+      [slug],
+    );
+    const deadlineForm = maya.locator('.bid-form');
+    await deadlineForm.locator('input').fill('200.00');
+    await deadlineForm.locator('button').click();
+    await seller.waitForTimeout(1_250);
+    await database.query('COMMIT');
+    await expect(deadlineForm.locator('.bid-message.error')).toHaveText(
+      'This auction ended before your bid could be accepted.',
+    );
+    await expect(deadlineForm.locator('input')).toHaveValue('200.00');
+    await expect(deadlineForm.locator('button')).toBeDisabled();
+    await expect(seller.locator('.ending strong')).toHaveText('Ended');
+
+    await announce(pages, 'TIME! LATE $200 BIDS ARE REJECTED');
     const afterDeadline = await Promise.all(
       [maya, theo, priya].map((page, index) =>
         page.evaluate(
@@ -173,14 +195,17 @@ test('Bidding War: simultaneous and deadline-crossing bids stay visible in four 
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ userId, amountCents: 20_000 }),
             });
-            return response.status;
+            return { status: response.status, body: await response.json() };
           },
           { auctionSlug: slug, userId: players[index + 1].userId },
         ),
       ),
     );
-    expect(afterDeadline).toEqual([409, 409, 409]);
-    await announce(pages, 'BUG REPRODUCED · DUPLICATE BIDS ACCEPTED · LATE BIDS REJECTED');
+    expect(afterDeadline).toEqual([
+      { status: 409, body: { code: 'AUCTION_ENDED', error: 'This auction has ended' } },
+      { status: 409, body: { code: 'AUCTION_ENDED', error: 'This auction has ended' } },
+      { status: 409, body: { code: 'AUCTION_ENDED', error: 'This auction has ended' } },
+    ]);
 
     const detail = await seller.evaluate(async (auctionSlug) => {
       const response = await fetch(`/api/auctions/${auctionSlug}`);
@@ -188,7 +213,18 @@ test('Bidding War: simultaneous and deadline-crossing bids stay visible in four 
     }, slug);
     expect(
       detail.bidHistory.filter((bid: { amountCents: number }) => bid.amountCents === 10_000),
-    ).toHaveLength(3);
+    ).toHaveLength(1);
+    expect(detail.currentPriceCents).toBe(11_000);
+
+    await Promise.all(
+      pages.map(async (page) => {
+        await expect(page.locator('.current-price strong')).toHaveText('$110');
+        await expect(page.locator('.bid-history-list article')).toHaveCount(
+          detail.bidHistory.length,
+        );
+      }),
+    );
+    await announce(pages, 'PROTECTED · ONE OPENING BID · LATE BIDS REJECTED');
 
     for (const page of pages) await page.bringToFront();
     if (holdOpenMilliseconds > 0) await seller.waitForTimeout(holdOpenMilliseconds);

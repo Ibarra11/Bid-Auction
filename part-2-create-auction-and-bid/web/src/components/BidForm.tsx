@@ -9,12 +9,17 @@ import {
   parseDollarsToCents,
 } from '../catalog';
 
-export function staleBidMessage(error: BidRequestError): string | null {
-  if (error.details.code !== 'BID_TOO_LOW') return null;
-  const minimum = error.details.minimumBidCents;
-  return minimum === undefined
-    ? 'Another bid arrived first. Check the new minimum and try again.'
-    : `Another bid arrived first. The new minimum is ${formatCurrency(minimum)}.`;
+export function bidConflictMessage(error: BidRequestError): string | null {
+  if (error.details.code === 'AUCTION_ENDED') {
+    return 'This auction ended before your bid could be accepted.';
+  }
+  if (error.details.code === 'BID_TOO_LOW') {
+    const minimum = error.details.minimumBidCents;
+    return minimum === undefined
+      ? 'Another bid arrived first. Check the new minimum and try again.'
+      : `Another bid arrived first. The new minimum is ${formatCurrency(minimum)}.`;
+  }
+  return null;
 }
 
 export function BidForm({
@@ -60,10 +65,10 @@ export function BidForm({
       setSuccess('Bid accepted.');
       await onAccepted().catch(() => undefined);
     } catch (caught) {
-      const staleMessage = caught instanceof BidRequestError ? staleBidMessage(caught) : null;
-      if (staleMessage) {
+      const conflictMessage = caught instanceof BidRequestError ? bidConflictMessage(caught) : null;
+      if (conflictMessage) {
         await onAccepted().catch(() => undefined);
-        setError(staleMessage);
+        setError(conflictMessage);
       } else {
         setError(caught instanceof Error ? caught.message : 'Could not place this bid.');
       }
