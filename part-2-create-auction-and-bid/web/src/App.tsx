@@ -213,6 +213,10 @@ function ItemPage({ slug, activeUser }: { slug: string; activeUser: DemoUser | n
   useEffect(() => {
     setError('');
     void loadAuction().catch(() => setError('Auction not found or unavailable.'));
+    const refresh = window.setInterval(() => {
+      void loadAuction().catch(() => setError('Auction not found or unavailable.'));
+    }, 750);
+    return () => window.clearInterval(refresh);
   }, [slug]);
 
   if (error) return <Status message={error} error />;

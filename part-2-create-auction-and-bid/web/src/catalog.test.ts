@@ -11,6 +11,7 @@ describe('catalog helpers', () => {
 
   it('formats remaining time and ended auctions', () => {
     const now = Date.parse('2026-01-01T12:00:00.000Z');
+    expect(formatTimeLeft('2026-01-01T12:00:30.000Z', now)).toBe('30s');
     expect(formatTimeLeft('2026-01-01T14:05:00.000Z', now)).toBe('2h 5m');
     expect(formatTimeLeft('2026-01-01T11:59:00.000Z', now)).toBe('Ended');
   });

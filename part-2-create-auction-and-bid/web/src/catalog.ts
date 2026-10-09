@@ -119,8 +119,12 @@ export function formatCurrency(cents: number): string {
 }
 
 export function formatTimeLeft(endsAt: string, now = Date.now()): string {
-  const remainingMinutes = Math.ceil((new Date(endsAt).getTime() - now) / 60_000);
-  if (remainingMinutes <= 0) return 'Ended';
+  const remainingMilliseconds = new Date(endsAt).getTime() - now;
+  if (remainingMilliseconds <= 0) return 'Ended';
+  if (remainingMilliseconds < 60_000) {
+    return `${Math.ceil(remainingMilliseconds / 1_000)}s`;
+  }
+  const remainingMinutes = Math.ceil(remainingMilliseconds / 60_000);
   const days = Math.floor(remainingMinutes / 1_440);
   const hours = Math.floor((remainingMinutes % 1_440) / 60);
   const minutes = remainingMinutes % 60;
